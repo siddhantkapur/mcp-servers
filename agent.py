@@ -192,12 +192,24 @@ async def main_async():
     print(f"   Email MCP Server: {EMAIL_MCP_URL}")
     print(f"   PDF MCP Server: {PDF_MCP_URL}")
     
-    # Create and run the agent
-    agent = create_agent()
+    # Create MCP servers and agent
+    mcp_servers = create_mcp_servers()
     
-    # Use context manager for proper MCP server lifecycle
-    async with agent:
+    # Initialize MCP servers using context managers
+    try:
+        # Connect to all MCP servers
+        for server in mcp_servers:
+            await server.connect()
+        
+        # Create agent with connected servers
+        agent = create_agent(mcp_servers=mcp_servers)
+        
+        # Run the agent loop
         await run_agent_loop(agent)
+    finally:
+        # Clean up MCP servers
+        for server in mcp_servers:
+            await server.cleanup()
 
 
 if __name__ == "__main__":
