@@ -27,7 +27,7 @@ load_dotenv()
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
 
 # MCP Server URLs
 EMAIL_MCP_URL = os.getenv("EMAIL_MCP_URL", "http://localhost:8000/mcp")
