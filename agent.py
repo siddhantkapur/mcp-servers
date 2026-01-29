@@ -195,7 +195,7 @@ async def main_async():
     # Create MCP servers and agent
     mcp_servers = create_mcp_servers()
     
-    # Initialize MCP servers using context managers
+    # Initialize MCP servers with manual lifecycle management
     try:
         # Connect to all MCP servers
         for server in mcp_servers:
@@ -207,9 +207,12 @@ async def main_async():
         # Run the agent loop
         await run_agent_loop(agent)
     finally:
-        # Clean up MCP servers
+        # Clean up MCP servers (handle exceptions to ensure all cleanup attempts are made)
         for server in mcp_servers:
-            await server.cleanup()
+            try:
+                await server.cleanup()
+            except Exception as e:
+                print(f"Warning: Error cleaning up server {server.name}: {e}")
 
 
 if __name__ == "__main__":

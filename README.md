@@ -101,9 +101,12 @@ async def main():
         )
         print(result.final_output)
     finally:
-        # Clean up MCP servers
+        # Clean up MCP servers (handle exceptions to ensure all cleanup attempts are made)
         for server in mcp_servers:
-            await server.cleanup()
+            try:
+                await server.cleanup()
+            except Exception as e:
+                print(f"Warning: Error cleaning up server: {e}")
 
 asyncio.run(main())
 ```
