@@ -75,13 +75,16 @@ def send_email(
                 smtp_server.login(username, password)
                 smtp_server.sendmail(sender, recipient, msg.as_string())
         else:
-            # Try SSL first, fallback to STARTTLS only on SSL connection errors
+            # Try SSL first, fallback to STARTTLS only on SSL/connection errors
             try:
                 with smtplib.SMTP_SSL(server, port) as smtp_server:
                     smtp_server.login(username, password)
                     smtp_server.sendmail(sender, recipient, msg.as_string())
-            except ssl.SSLError:
-                # SSL handshake failed - server likely doesn't support direct SSL
+            except (ssl.SSLError, OSError):
+                # SSL handshake or connection failed - try STARTTLS as fallback
+                # OSError covers connection issues, ssl.SSLError covers SSL-specific failures
+                # Note: Authentication errors (SMTPAuthenticationError) are NOT caught here
+                # and will propagate to the outer exception handler
                 with smtplib.SMTP(server, port) as smtp_server:
                     smtp_server.starttls()
                     smtp_server.login(username, password)
