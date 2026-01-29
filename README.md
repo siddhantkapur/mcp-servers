@@ -6,10 +6,12 @@ This project contains MCP (Model Context Protocol) servers and an agent that use
 
 ```
 mcp-servers/
-├── email_mcp_server/     # Email MCP server
-│   └── server.py         # Email sending server
-├── agent.py              # MCP Agent for using MCP tools
-└── requirements.txt      # Python dependencies
+├── email_mcp_server/        # Email MCP server
+│   └── server.py            # Email sending server
+├── pdf_operations_server/   # PDF Operations MCP server
+│   └── server.py            # PDF manipulation server
+├── agent.py                 # MCP Agent for using MCP tools
+└── requirements.txt         # Python dependencies
 ```
 
 ## Setup
@@ -27,6 +29,13 @@ mcp-servers/
    python3 -m email_mcp_server.server
    ```
    The server will run on `http://localhost:8000/mcp`
+
+3. **Start the PDF Operations MCP Server:**
+   ```bash
+   source .venv/bin/activate
+   python3 -m pdf_operations_server.server
+   ```
+   The server will run on `http://localhost:8001/mcp`
 
 ## Using the Agent
 
@@ -191,6 +200,72 @@ The server comes with **default SMTP settings** configured. You can:
   - **Returns:** `True` if successful, `False` otherwise
   
   If optional SMTP parameters are not provided, the server uses default values configured in `server.py`.
+
+## PDF Operations MCP Server
+
+The PDF operations server provides tools for working with PDF files.
+
+### Configuration
+
+The server can be configured via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PDF_OUTPUT_DIR` | (same as input) | Default output directory for generated files |
+| `PDF_IMAGE_FORMAT` | `PNG` | Default image format for PDF to image conversion |
+| `PDF_IMAGE_DPI` | `200` | Default DPI for image conversion |
+| `PDF_SERVER_HOST` | `0.0.0.0` | Server host address |
+| `PDF_SERVER_PORT` | `8001` | Server port |
+
+### Available Tools
+
+- **`get_pdf_info(path)`**: Get PDF metadata and information
+  - Returns: page count, metadata (title, author, etc.), file size, encryption status
+
+- **`extract_text_from_pdf(path, start_page?, end_page?)`**: Extract text from PDF
+  - Optional page range support (1-based page numbers)
+  - Returns: extracted text and page count
+
+- **`merge_pdfs(files, output)`**: Merge multiple PDFs into one
+  - Returns: output path, total page count, files merged count
+
+- **`split_pdf(path, pages, output_dir?)`**: Split specific pages into individual PDFs
+  - Returns: list of output file paths
+
+- **`pdf_to_images(path, output_dir?, image_format?, dpi?, pages?)`**: Convert PDF pages to images
+  - Supports PNG, JPEG, TIFF, BMP, GIF formats
+  - Configurable DPI (1-600)
+  - Optional specific page selection
+  - Returns: list of image file paths
+
+- **`rotate_pdf(path, rotation, pages?, output?)`**: Rotate pages in a PDF
+  - Supports 90, 180, 270 degree rotations
+  - Can rotate specific pages or all pages
+  - Returns: output path, pages rotated count
+
+- **`extract_pages(path, pages, output)`**: Extract specific pages to a new PDF
+  - Returns: output path, page count
+
+### Response Format
+
+All tools return structured responses with consistent format:
+
+```json
+{
+  "success": true,
+  "output_path": "/path/to/output.pdf",
+  "page_count": 3,
+  ...
+}
+```
+
+On error:
+```json
+{
+  "success": false,
+  "error": "Error message description"
+}
+```
 
 ## Troubleshooting
 
