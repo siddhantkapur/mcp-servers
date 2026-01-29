@@ -79,7 +79,7 @@ def send_email(
                 with smtplib.SMTP_SSL(server, port) as smtp_server:
                     smtp_server.login(username, password)
                     smtp_server.sendmail(sender, recipient, msg.as_string())
-            except:
+            except (smtplib.SMTPException, OSError):
                 with smtplib.SMTP(server, port) as smtp_server:
                     smtp_server.starttls()
                     smtp_server.login(username, password)
