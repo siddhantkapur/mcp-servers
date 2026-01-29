@@ -13,7 +13,7 @@ Environment Variables:
 """
 import asyncio
 import os
-from typing import Optional
+from typing import List, Optional
 
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
@@ -25,7 +25,7 @@ from agents.mcp import MCPServerStreamableHttp
 load_dotenv()
 
 # Configuration
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
@@ -44,7 +44,7 @@ def create_gemini_model() -> OpenAIChatCompletionsModel:
     Raises:
         ValueError: If GEMINI_API_KEY is not set
     """
-    if not GEMINI_API_KEY:
+    if GEMINI_API_KEY is None:
         raise ValueError(
             "GEMINI_API_KEY environment variable is required. "
             "Please set it in your .env file or environment."
@@ -61,7 +61,7 @@ def create_gemini_model() -> OpenAIChatCompletionsModel:
     )
 
 
-def create_mcp_servers() -> list:
+def create_mcp_servers() -> List[MCPServerStreamableHttp]:
     """
     Create MCP server connections for email and PDF operations.
     
@@ -88,7 +88,7 @@ def create_mcp_servers() -> list:
 
 
 def create_agent(
-    mcp_servers: Optional[list] = None,
+    mcp_servers: Optional[List[MCPServerStreamableHttp]] = None,
     model: Optional[OpenAIChatCompletionsModel] = None,
 ) -> Agent:
     """
@@ -148,8 +148,6 @@ async def run_agent_loop(agent: Agent):
     print("\n🤖 MCP Agent powered by Gemini is ready!")
     print("Type your message and press Enter. Type 'quit' or 'exit' to stop.\n")
     
-    conversation_history = []
-    
     while True:
         try:
             user_input = input("You: ").strip()
@@ -180,8 +178,8 @@ async def main_async():
     """Main async entry point."""
     import sys
     
-    # Check for API key
-    if not GEMINI_API_KEY:
+    # Early check for API key with helpful error message
+    if GEMINI_API_KEY is None:
         print("❌ Error: GEMINI_API_KEY environment variable is not set.")
         print("\nPlease set your Gemini API key:")
         print("  1. Create a .env file with: GEMINI_API_KEY=your_api_key_here")
