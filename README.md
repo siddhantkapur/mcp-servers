@@ -1,6 +1,6 @@
 # MCP Servers & Agent
 
-This project contains MCP (Model Context Protocol) servers and an agent that uses them.
+This project contains MCP (Model Context Protocol) servers and an AI-powered agent that uses them with Google Gemini.
 
 ## Project Structure
 
@@ -10,7 +10,7 @@ mcp-servers/
 │   └── server.py            # Email sending server
 ├── pdf_operations_server/   # PDF Operations MCP server
 │   └── server.py            # PDF manipulation server
-├── agent.py                 # MCP Agent for using MCP tools
+├── agent.py                 # OpenAI Agents SDK Agent with Gemini + MCP
 └── requirements.txt         # Python dependencies
 ```
 
@@ -23,14 +23,26 @@ mcp-servers/
    pip install -r requirements.txt
    ```
 
-2. **Start the Email MCP Server:**
+2. **Configure your Gemini API key:**
+   
+   Get an API key from [Google AI Studio](https://aistudio.google.com/apikey), then either:
+   
+   ```bash
+   # Option 1: Set environment variable
+   export GEMINI_API_KEY=your_api_key_here
+   
+   # Option 2: Create a .env file
+   echo "GEMINI_API_KEY=your_api_key_here" > .env
+   ```
+
+3. **Start the Email MCP Server:**
    ```bash
    source .venv/bin/activate
    python3 -m email_mcp_server.server
    ```
    The server will run on `http://localhost:8000/mcp`
 
-3. **Start the PDF Operations MCP Server:**
+4. **Start the PDF Operations MCP Server:**
    ```bash
    source .venv/bin/activate
    python3 -m pdf_operations_server.server
@@ -39,138 +51,77 @@ mcp-servers/
 
 ## Using the Agent
 
-### Command Line Usage (Interactive)
+### Interactive Chat Mode
 
-The easiest way to use the agent is through the interactive command line:
+Run the agent for an interactive chat session:
 
 ```bash
-python agent.py send
+python agent.py
 ```
 
-This will prompt you for:
-- Recipient email address
-- Subject
-- Email body (multi-line input)
-- Sender email address
-- SMTP Server (optional, defaults to smtp.gmail.com)
-- SMTP Port (optional, defaults to 465)
-- **SMTP Username/Email (required)**
-- **SMTP Password/App Password (required)**
-- Confirmation before sending
+The agent will connect to the MCP servers and start an interactive conversation where you can ask it to:
+- Send emails
+- Extract text from PDFs
+- Merge, split, or rotate PDFs
+- Convert PDFs to images
+- And more!
 
-The SMTP credentials you provide will be passed to the MCP server for sending the email.
+### Environment Variables
 
-### Programmatic Usage (Async - Recommended)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GEMINI_API_KEY` | (required) | Your Google Gemini API key |
+| `GEMINI_MODEL` | `gemini-2.0-flash` | Gemini model to use |
+| `EMAIL_MCP_URL` | `http://localhost:8000/mcp` | Email MCP server URL |
+| `PDF_MCP_URL` | `http://localhost:8001/mcp` | PDF Operations MCP server URL |
+
+### Programmatic Usage
 
 ```python
 import asyncio
-from agent import MCPAgent
+from agent import create_agent
 
 async def main():
-    # Use async context manager (automatically handles connection/disconnection)
-    async with MCPAgent() as agent:
-        # Send an email
-        success = await agent.send_email(
-            sender="your-email@gmail.com",
-            recipient="recipient@gmail.com",
-            subject="Hello",
-            body="This is a test email!"
+    agent = create_agent()
+    
+    # Use the agent with Runner
+    from agents import Runner
+    
+    async with agent:
+        result = await Runner.run(
+            agent,
+            input="Extract text from /path/to/document.pdf"
         )
-        
-        if success:
-            print("Email sent successfully!")
+        print(result.final_output)
 
 asyncio.run(main())
 ```
 
-### Programmatic Usage (Synchronous)
+### Custom Configuration
 
 ```python
-from agent import MCPAgentSync
+from agent import create_gemini_model, create_mcp_servers, create_agent
+from agents.mcp import MCPServerStreamableHttp
 
-# Create agent instance
-agent = MCPAgentSync()
+# Create custom MCP servers
+custom_servers = [
+    MCPServerStreamableHttp(
+        params={"url": "http://localhost:9000/mcp"},
+        name="Custom MCP Server",
+    ),
+]
 
-# Connect to MCP server
-agent.connect()
-
-try:
-    # Send an email
-    success = agent.send_email(
-        sender="your-email@gmail.com",
-        recipient="recipient@gmail.com",
-        subject="Hello",
-        body="This is a test email!"
-    )
-    
-    if success:
-        print("Email sent successfully!")
-finally:
-    agent.disconnect()
-```
-
-### Advanced Usage
-
-#### List Available Tools
-
-```python
-# Async
-async with MCPAgent() as agent:
-    tools = await agent.list_tools()
-    for tool in tools:
-        print(f"Tool: {tool['name']}")
-
-# Sync
-agent = MCPAgentSync()
-agent.connect()
-try:
-    tools = agent.list_tools()
-    for tool in tools:
-        print(f"Tool: {tool['name']}")
-finally:
-    agent.disconnect()
-```
-
-#### Call Any Tool Directly
-
-```python
-# Async
-async with MCPAgent() as agent:
-    result = await agent.call_tool("send_email", {
-        "sender": "sender@gmail.com",
-        "recipient": "recipient@gmail.com",
-        "subject": "Test",
-        "body": "Hello!"
-    })
-    
-    if result["success"]:
-        print("Tool executed successfully!")
-
-# Sync
-agent = MCPAgentSync()
-agent.connect()
-try:
-    result = agent.call_tool("send_email", {
-        "sender": "sender@gmail.com",
-        "recipient": "recipient@gmail.com",
-        "subject": "Test",
-        "body": "Hello!"
-    })
-    if result["success"]:
-        print("Tool executed successfully!")
-finally:
-    agent.disconnect()
+# Create agent with custom configuration
+agent = create_agent(mcp_servers=custom_servers)
 ```
 
 ## Agent Features
 
-- ✅ **Built with FastMCP Client SDK**: Uses official FastMCP Client for reliable MCP protocol handling
-- ✅ **Automatic Session Management**: Handles MCP session creation and management automatically
-- ✅ **Tool Discovery**: List all available tools from the MCP server
-- ✅ **Error Handling**: Graceful error handling and reporting
-- ✅ **Async & Sync Support**: Both async/await and synchronous wrappers available
-- ✅ **Interactive CLI**: Easy-to-use command line interface that prompts for SMTP credentials
-- ✅ **Easy to Extend**: Simple API for adding new tool methods
+- ✅ **Powered by Google Gemini**: Uses Gemini's OpenAI-compatible API via the OpenAI Agents SDK
+- ✅ **MCP Integration**: Connects to multiple MCP servers for email and PDF operations
+- ✅ **Interactive Chat**: Natural language conversation interface
+- ✅ **Tool Calling**: Automatically uses the right tools based on your requests
+- ✅ **Extensible**: Easy to add more MCP servers and capabilities
 
 ## Email MCP Server
 
@@ -269,14 +220,14 @@ On error:
 
 ## Troubleshooting
 
+### "GEMINI_API_KEY environment variable is not set"
+- Make sure you've set your Gemini API key via environment variable or `.env` file
+- Get an API key from [Google AI Studio](https://aistudio.google.com/apikey)
+
 ### "Failed to connect to MCP server"
-- Make sure the MCP server is running on `http://localhost:8000/mcp`
+- Make sure the MCP server is running on the expected URL
 - Check that the server started without errors
 - Verify the server is accessible: `curl http://localhost:8000/mcp`
-
-### "No valid session ID provided"
-- The agent should handle this automatically
-- Make sure you're calling `agent.connect()` before using tools (or use the context manager)
 
 ### Email sending fails
 - **Using defaults**: Check SMTP credentials in `email_mcp_server/server.py` (default values)
@@ -284,42 +235,53 @@ On error:
 - **Gmail/Yahoo**: Use App Password, not your regular password
 - **Port settings**: Gmail uses port 465 (SSL) or 587 (TLS)
 - **Server logs**: Check server terminal for detailed error messages
-- **Test connection**: Try connecting with a regular email client first to verify credentials
 
 ### Import errors
 - Make sure all dependencies are installed: `pip install -r requirements.txt`
-- Verify you're using the correct Python version (3.8+)
+- Verify you're using the correct Python version (3.9+)
 - Activate your virtual environment: `source .venv/bin/activate`
 
 ## Extending the Agent
 
-To add support for new MCP tools:
+### Adding More MCP Servers
 
-1. **Add a convenience method to the `MCPAgent` class:**
-   ```python
-   async def my_new_tool(self, arg1: str, arg2: int) -> dict:
-       return await self.call_tool("my_new_tool", {
-           "arg1": arg1,
-           "arg2": arg2
-       })
-   ```
+To add more MCP servers to the agent:
 
-2. **Or use `call_tool()` directly:**
-   ```python
-   # Async
-   result = await agent.call_tool("tool_name", {"param": "value"})
-   
-   # Sync
-   result = agent.call_tool("tool_name", {"param": "value"})
-   ```
+```python
+from agent import create_agent
+from agents.mcp import MCPServerStreamableHttp
 
-3. **For synchronous wrapper, add to `MCPAgentSync` class:**
-   ```python
-   def my_new_tool(self, arg1: str, arg2: int) -> dict:
-       if not self._agent:
-           raise RuntimeError("Not connected. Call connect() first.")
-       return asyncio.run(self._agent.my_new_tool(arg1, arg2))
-   ```
+# Create your custom MCP servers
+custom_servers = [
+    MCPServerStreamableHttp(
+        params={"url": "http://localhost:8000/mcp"},
+        name="Email Server",
+    ),
+    MCPServerStreamableHttp(
+        params={"url": "http://localhost:8001/mcp"},
+        name="PDF Server",
+    ),
+    MCPServerStreamableHttp(
+        params={"url": "http://localhost:9000/mcp"},
+        name="Your Custom Server",
+    ),
+]
+
+agent = create_agent(mcp_servers=custom_servers)
+```
+
+### Using Different Gemini Models
+
+Set the `GEMINI_MODEL` environment variable:
+
+```bash
+export GEMINI_MODEL=gemini-1.5-pro
+```
+
+Available models include:
+- `gemini-2.0-flash` (default, fast)
+- `gemini-1.5-flash` (fast, cost-effective)
+- `gemini-1.5-pro` (more capable)
 
 ## Building More MCP Servers
 

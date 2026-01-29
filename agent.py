@@ -1,214 +1,203 @@
 """
-MCP Agent - Built using FastMCP Client SDK.
+MCP Agent - Built using OpenAI Agents SDK with Gemini API.
 Supports Email and PDF Operations MCP Servers.
+
+This agent uses Google Gemini's OpenAI-compatible API to power an intelligent
+assistant that can interact with MCP servers for email and PDF operations.
+
+Environment Variables:
+    GEMINI_API_KEY: Your Google Gemini API key (required)
+    EMAIL_MCP_URL: URL for Email MCP server (default: http://localhost:8000/mcp)
+    PDF_MCP_URL: URL for PDF Operations MCP server (default: http://localhost:8001/mcp)
+    GEMINI_MODEL: Gemini model to use (default: gemini-2.0-flash)
 """
 import asyncio
-from typing import Dict, Any, Optional, List
-from fastmcp import Client
+import os
+from typing import List, Optional
+
+from dotenv import load_dotenv
+from openai import AsyncOpenAI
+from agents import Agent, Runner
+from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+from agents.mcp import MCPServerStreamableHttp
+
+# Load environment variables
+load_dotenv()
+
+# Configuration
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+
+# MCP Server URLs
+EMAIL_MCP_URL = os.getenv("EMAIL_MCP_URL", "http://localhost:8000/mcp")
+PDF_MCP_URL = os.getenv("PDF_MCP_URL", "http://localhost:8001/mcp")
 
 
-class MCPAgent:
-    """Agent that connects to an MCP server and uses its tools via FastMCP Client SDK."""
+def create_gemini_model() -> OpenAIChatCompletionsModel:
+    """
+    Create an OpenAI-compatible model client for Gemini API.
     
-    def __init__(self, mcp_url: str = "http://localhost:8000/mcp"):
-        """
-        Initialize the MCP Agent.
+    Returns:
+        OpenAIChatCompletionsModel configured for Gemini
         
-        Args:
-            mcp_url: URL of the MCP server endpoint
-        """
-        self.mcp_url = mcp_url
-        self.client: Optional[Client] = None
-        self._connected = False
+    Raises:
+        ValueError: If GEMINI_API_KEY is not set
+    """
+    if GEMINI_API_KEY is None:
+        raise ValueError(
+            "GEMINI_API_KEY environment variable is required. "
+            "Please set it in your .env file or environment."
+        )
     
-    async def connect(self) -> bool:
-        """
-        Establish a connection/session with the MCP server.
+    client = AsyncOpenAI(
+        api_key=GEMINI_API_KEY,
+        base_url=GEMINI_BASE_URL,
+    )
+    
+    return OpenAIChatCompletionsModel(
+        model=GEMINI_MODEL,
+        openai_client=client,
+    )
+
+
+def create_mcp_servers() -> List[MCPServerStreamableHttp]:
+    """
+    Create MCP server connections for email and PDF operations.
+    
+    Returns:
+        List of MCPServerStreamableHttp instances
+    """
+    servers = []
+    
+    # Email MCP Server
+    email_server = MCPServerStreamableHttp(
+        params={"url": EMAIL_MCP_URL},
+        name="Email MCP Server",
+    )
+    servers.append(email_server)
+    
+    # PDF Operations MCP Server
+    pdf_server = MCPServerStreamableHttp(
+        params={"url": PDF_MCP_URL},
+        name="PDF Operations MCP Server",
+    )
+    servers.append(pdf_server)
+    
+    return servers
+
+
+def create_agent(
+    mcp_servers: Optional[List[MCPServerStreamableHttp]] = None,
+    model: Optional[OpenAIChatCompletionsModel] = None,
+) -> Agent:
+    """
+    Create an MCP Agent with Gemini model and MCP server connections.
+    
+    Args:
+        mcp_servers: Optional list of MCP servers. If not provided, uses default servers.
+        model: Optional model instance. If not provided, creates Gemini model.
         
-        Returns:
-            True if connection successful, False otherwise
-        """
+    Returns:
+        Configured Agent instance
+    """
+    if model is None:
+        model = create_gemini_model()
+    
+    if mcp_servers is None:
+        mcp_servers = create_mcp_servers()
+    
+    instructions = """You are a helpful assistant with access to email and PDF operations tools.
+
+You can help users with:
+
+**Email Operations:**
+- Send emails using the send_email tool
+
+**PDF Operations:**
+- Get PDF information (page count, metadata, file size)
+- Extract text from PDF files
+- Merge multiple PDF files into one
+- Split PDFs into individual pages
+- Convert PDF pages to images
+- Rotate PDF pages
+- Extract specific pages from a PDF
+
+When a user asks you to perform an operation:
+1. Understand what they want to accomplish
+2. Use the appropriate tool(s) from the MCP servers
+3. Provide clear feedback about the results
+
+Always be helpful and explain what you're doing step by step."""
+
+    return Agent(
+        name="MCP Assistant",
+        instructions=instructions,
+        model=model,
+        mcp_servers=mcp_servers,
+    )
+
+
+async def run_agent_loop(agent: Agent):
+    """
+    Run an interactive chat loop with the agent.
+    
+    Args:
+        agent: The configured Agent instance
+    """
+    print("\n🤖 MCP Agent powered by Gemini is ready!")
+    print("Type your message and press Enter. Type 'quit' or 'exit' to stop.\n")
+    
+    while True:
         try:
-            self.client = Client(self.mcp_url)
-            await self.client.__aenter__()
-            self._connected = True
-            print(f"✅ Connected to MCP server at {self.mcp_url}")
-            return True
-        except Exception as e:
-            print(f"❌ Failed to connect to MCP server: {e}")
-            return False
-    
-    async def disconnect(self):
-        """Close the connection to the MCP server."""
-        if self.client and self._connected:
-            await self.client.__aexit__(None, None, None)
-            self._connected = False
-            print("Disconnected from MCP server")
-    
-    async def list_tools(self) -> List[Dict[str, Any]]:
-        """
-        List all available tools from the MCP server.
-        
-        Returns:
-            List of available tools
-        """
-        if not self._connected or not self.client:
-            raise RuntimeError("Not connected to MCP server. Call connect() first.")
-        
-        try:
-            tools_result = await self.client.list_tools()
-            return tools_result.tools if hasattr(tools_result, 'tools') else []
-        except Exception as e:
-            print(f"Error listing tools: {e}")
-            return []
-    
-    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Call a tool on the MCP server.
-        
-        Args:
-            tool_name: Name of the tool to call
-            arguments: Arguments to pass to the tool
+            user_input = input("You: ").strip()
             
-        Returns:
-            Tool execution result with 'success' and 'result' or 'error' keys
-        """
-        if not self._connected or not self.client:
-            raise RuntimeError("Not connected to MCP server. Call connect() first.")
-        
-        try:
-            result = await self.client.call_tool(tool_name, arguments)
+            if not user_input:
+                continue
             
-            # Extract the result from the tool response
-            if hasattr(result, 'content') and result.content:
-                # Get text content
-                text_content = result.content[0].text if result.content else ""
-                
-                # Get structured content if available
-                structured_content = {}
-                if hasattr(result, 'structuredContent') and result.structuredContent:
-                    structured_content = result.structuredContent
-                
-                return {
-                    "success": True,
-                    "result": {
-                        "content": [{"type": "text", "text": text_content}],
-                        "structuredContent": structured_content
-                    }
-                }
-            else:
-                return {
-                    "success": True,
-                    "result": {"content": []}
-                }
+            if user_input.lower() in ('quit', 'exit', 'q'):
+                print("\n👋 Goodbye!")
+                break
+            
+            # Run the agent with the user's input
+            result = await Runner.run(
+                agent,
+                input=user_input,
+            )
+            
+            print(f"\nAssistant: {result.final_output}\n")
+            
+        except KeyboardInterrupt:
+            print("\n\n👋 Goodbye!")
+            break
         except Exception as e:
-            return {
-                "success": False,
-                "error": {"message": str(e)}
-            }
-    
-    # Email Tool
-    async def send_email(self, **kwargs) -> bool:
-        """
-        Send an email using the send_email tool.
-        """
-        result = await self.call_tool("send_email", kwargs)
-        return result.get("success", False)
-    
-    # PDF Tools
-    async def extract_text_from_pdf(self, path: str) -> str:
-        """
-        Extract text from a PDF file.
-        """
-        result = await self.call_tool("extract_text_from_pdf", {"path": path})
-        if result["success"]:
-            return result["result"]["content"][0]["text"]
-        return f"Error: {result['error']['message']}"
-    
-    async def merge_pdfs(self, files: List[str], output: str) -> str:
-        """
-        Merge multiple PDF files into one.
-        """
-        result = await self.call_tool("merge_pdfs", {"files": files, "output": output})
-        if result["success"]:
-            return result["result"]["content"][0]["text"]
-        return f"Error: {result['error']['message']}"
-    
-    async def split_pdf(self, path: str, pages: List[int]) -> List[str]:
-        """
-        Split a PDF into individual pages.
-        """
-        result = await self.call_tool("split_pdf", {"path": path, "pages": pages})
-        if result["success"]:
-            return result["result"]["structuredContent"]["files"]
-        return f"Error: {result['error']['message']}"
-    
-    async def pdf_to_images(self, path: str) -> List[str]:
-        """
-        Convert PDF pages to images.
-        """
-        result = await self.call_tool("pdf_to_images", {"path": path})
-        if result["success"]:
-            return result["result"]["structuredContent"]["images"]
-        return f"Error: {result['error']['message']}"
-    
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self.connect()
-        return self
-    
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        await self.disconnect()
+            print(f"\n❌ Error: {e}\n")
 
 
-# Example usage and CLI interface
 async def main_async():
-    """Async main function."""
+    """Main async entry point."""
     import sys
     
-    # Use async context manager
-    async with MCPAgent() as agent:
-        # List available tools
-        print("\n📋 Available tools:")
-        tools = await agent.list_tools()
-        for tool in tools:
-            print(f"  - {tool['name']}")
-        
-        # Example: Extract text from a PDF
-        if len(sys.argv) > 1 and sys.argv[1] == "extract_text":
-            pdf_path = input("Enter the path to the PDF file: ").strip()
-            text = await agent.extract_text_from_pdf(pdf_path)
-            print("\nExtracted Text:")
-            print(text)
-        
-        # Example: Merge PDFs
-        elif len(sys.argv) > 1 and sys.argv[1] == "merge_pdfs":
-            files = input("Enter the paths to the PDF files (comma-separated): ").split(",")
-            output = input("Enter the output file path: ").strip()
-            result = await agent.merge_pdfs(files, output)
-            print(f"\nMerge Result: {result}")
-        
-        # Example: Split PDF
-        elif len(sys.argv) > 1 and sys.argv[1] == "split_pdf":
-            pdf_path = input("Enter the path to the PDF file: ").strip()
-            pages = input("Enter the page numbers to split (comma-separated): ").split(",")
-            pages = [int(page.strip()) for page in pages]
-            result = await agent.split_pdf(pdf_path, pages)
-            print(f"\nSplit Result: {result}")
-        
-        # Example: Convert PDF to Images
-        elif len(sys.argv) > 1 and sys.argv[1] == "pdf_to_images":
-            pdf_path = input("Enter the path to the PDF file: ").strip()
-            result = await agent.pdf_to_images(pdf_path)
-            print(f"\nImages Generated: {result}")
-        
-        else:
-            print("\n💡 Usage examples:")
-            print("  python agent.py extract_text")
-            print("  python agent.py merge_pdfs")
-            print("  python agent.py split_pdf")
-            print("  python agent.py pdf_to_images")
+    # Early check for API key with helpful error message
+    if GEMINI_API_KEY is None:
+        print("❌ Error: GEMINI_API_KEY environment variable is not set.")
+        print("\nPlease set your Gemini API key:")
+        print("  1. Create a .env file with: GEMINI_API_KEY=your_api_key_here")
+        print("  2. Or export it: export GEMINI_API_KEY=your_api_key_here")
+        print("\nYou can get an API key from: https://aistudio.google.com/apikey")
+        sys.exit(1)
+    
+    print("🚀 Starting MCP Agent with Gemini...")
+    print(f"   Model: {GEMINI_MODEL}")
+    print(f"   Email MCP Server: {EMAIL_MCP_URL}")
+    print(f"   PDF MCP Server: {PDF_MCP_URL}")
+    
+    # Create and run the agent
+    agent = create_agent()
+    
+    # Use context manager for proper MCP server lifecycle
+    async with agent:
+        await run_agent_loop(agent)
 
 
 if __name__ == "__main__":

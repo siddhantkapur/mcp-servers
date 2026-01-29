@@ -3,3 +3,4 @@ requests
 python-dotenv
 PyPDF2
 pdf2image
+openai-agents
