@@ -1,5 +1,7 @@
 import os
 import logging
+import tempfile
+import shutil
 from typing import Optional
 from fastmcp import FastMCP
 from PyPDF2 import PdfReader, PdfWriter
@@ -62,7 +64,7 @@ def validate_pdf_path(path: str) -> None:
         raise ValueError(f"File is not a PDF: {path}")
 
 
-def get_output_path(original_path: str, suffix: str, output_dir: Optional[str] = None) -> str:
+def get_output_path(original_path: str, suffix: str, output_dir: Optional[str] = None, ext: Optional[str] = None) -> str:
     """
     Generate an output file path based on the original path and a suffix.
     
@@ -70,18 +72,22 @@ def get_output_path(original_path: str, suffix: str, output_dir: Optional[str] =
         original_path: Original file path.
         suffix: Suffix to append to the filename.
         output_dir: Optional output directory. If not provided, uses the same directory as the original file.
+        ext: Optional file extension. If not provided, uses the same extension as the original file.
         
     Returns:
         Generated output path.
     """
     base_name = os.path.splitext(os.path.basename(original_path))[0]
-    ext = os.path.splitext(original_path)[1]
+    file_ext = ext or os.path.splitext(original_path)[1]
     
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
-        return os.path.join(output_dir, f"{base_name}{suffix}{ext}")
+        return os.path.join(output_dir, f"{base_name}{suffix}{file_ext}")
     
-    return f"{os.path.splitext(original_path)[0]}{suffix}{ext}"
+    dir_path = os.path.dirname(original_path)
+    if dir_path:
+        return os.path.join(dir_path, f"{base_name}{suffix}{file_ext}")
+    return f"{base_name}{suffix}{file_ext}"
 
 
 @mcp.tool
@@ -159,15 +165,25 @@ def extract_text_from_pdf(
         reader = PdfReader(path)
         total_pages = len(reader.pages)
         
-        # Validate and set page range
-        start_idx = 0 if start_page is None else max(0, start_page - 1)
-        end_idx = total_pages if end_page is None else min(total_pages, end_page)
+        # Validate page numbers if provided
+        if start_page is not None:
+            if not isinstance(start_page, int) or start_page < 1:
+                return {"success": False, "error": f"Invalid start_page: {start_page}. Must be a positive integer."}
+            if start_page > total_pages:
+                return {"success": False, "error": f"Start page {start_page} exceeds total pages ({total_pages})"}
         
-        if start_idx >= total_pages:
-            return {
-                "success": False,
-                "error": f"Start page {start_page} exceeds total pages ({total_pages})"
-            }
+        if end_page is not None:
+            if not isinstance(end_page, int) or end_page < 1:
+                return {"success": False, "error": f"Invalid end_page: {end_page}. Must be a positive integer."}
+            if end_page > total_pages:
+                return {"success": False, "error": f"End page {end_page} exceeds total pages ({total_pages})"}
+        
+        # Validate page range
+        start_idx = 0 if start_page is None else start_page - 1
+        end_idx = total_pages if end_page is None else end_page
+        
+        if end_idx <= start_idx:
+            return {"success": False, "error": f"Invalid page range: start_page ({start_page or 1}) must be less than end_page ({end_page})"}
         
         text_parts = []
         for i in range(start_idx, end_idx):
@@ -264,11 +280,11 @@ def split_pdf(
     output_dir: Optional[str] = None
 ) -> dict:
     """
-    Split a PDF into individual pages or page ranges.
+    Split specific pages from a PDF into individual PDF files.
 
     Args:
         path: Path to the PDF file.
-        pages: List of page numbers (1-based) to extract.
+        pages: List of page numbers (1-based) to extract as individual files.
         output_dir: Optional directory to save split PDFs. Defaults to same directory as input.
 
     Returns:
@@ -346,7 +362,7 @@ def pdf_to_images(
         path: Path to the PDF file.
         output_dir: Optional directory to save images. Defaults to same directory as input.
         image_format: Image format (PNG, JPEG, etc.). Defaults to PNG.
-        dpi: Resolution in DPI. Defaults to 200.
+        dpi: Resolution in DPI (1-2400). Defaults to 200. Higher values use more memory.
         pages: Optional list of page numbers (1-based) to convert. Converts all pages if not specified.
 
     Returns:
@@ -372,21 +388,12 @@ def pdf_to_images(
         if effective_format == "JPG":
             effective_format = "JPEG"
         
-        # Validate DPI
-        if effective_dpi < 1 or effective_dpi > 600:
-            return {"success": False, "error": f"DPI must be between 1 and 600, got {effective_dpi}"}
+        # Validate DPI (increased upper limit for professional use cases)
+        if effective_dpi < 1 or effective_dpi > 2400:
+            return {"success": False, "error": f"DPI must be between 1 and 2400, got {effective_dpi}"}
         
         if effective_output_dir:
             os.makedirs(effective_output_dir, exist_ok=True)
-        
-        # Convert PDF to images
-        convert_kwargs = {"dpi": effective_dpi}
-        if pages:
-            # pdf2image uses 1-based page numbers
-            convert_kwargs["first_page"] = min(pages)
-            convert_kwargs["last_page"] = max(pages)
-        
-        images = convert_from_path(path, **convert_kwargs)
         
         base_name = os.path.splitext(os.path.basename(path))[0]
         ext = effective_format.lower()
@@ -395,24 +402,30 @@ def pdf_to_images(
         
         image_files = []
         
-        # If specific pages requested, filter the images
+        # Convert specific pages or all pages
         if pages:
-            page_offset = min(pages) - 1
-            for i, image in enumerate(images):
-                actual_page = page_offset + i + 1
-                if actual_page in pages:
-                    if effective_output_dir:
-                        image_path = os.path.join(effective_output_dir, f"{base_name}_page_{actual_page}.{ext}")
-                    else:
-                        image_path = f"{os.path.splitext(path)[0]}_page_{actual_page}.{ext}"
-                    image.save(image_path, effective_format)
+            # Validate page numbers
+            for page_num in pages:
+                if not isinstance(page_num, int) or page_num < 1:
+                    return {"success": False, "error": f"Invalid page number: {page_num}. Must be a positive integer."}
+            
+            # Convert each requested page individually to avoid converting unnecessary pages
+            for page_num in sorted(set(pages)):
+                page_images = convert_from_path(
+                    path,
+                    dpi=effective_dpi,
+                    first_page=page_num,
+                    last_page=page_num
+                )
+                if page_images:
+                    image_path = get_output_path(path, f"_page_{page_num}", effective_output_dir, f".{ext}")
+                    page_images[0].save(image_path, effective_format)
                     image_files.append(image_path)
         else:
+            # Convert all pages at once
+            images = convert_from_path(path, dpi=effective_dpi)
             for i, image in enumerate(images):
-                if effective_output_dir:
-                    image_path = os.path.join(effective_output_dir, f"{base_name}_page_{i + 1}.{ext}")
-                else:
-                    image_path = f"{os.path.splitext(path)[0]}_page_{i + 1}.{ext}"
+                image_path = get_output_path(path, f"_page_{i + 1}", effective_output_dir, f".{ext}")
                 image.save(image_path, effective_format)
                 image_files.append(image_path)
         
@@ -457,6 +470,10 @@ def rotate_pdf(
         - output_path: Path to the rotated PDF (if successful)
         - pages_rotated: Number of pages rotated
         - error: Error message (if failed)
+        
+    Note:
+        When output is not specified, the original file is replaced. The operation uses
+        a temporary file to prevent data corruption if an error occurs during writing.
     """
     try:
         validate_pdf_path(path)
@@ -486,14 +503,30 @@ def rotate_pdf(
             writer.add_page(page)
         
         output_path = output or path
+        overwriting_original = output_path == path
         
         # Ensure output directory exists
         output_dir = os.path.dirname(output_path)
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
         
-        with open(output_path, "wb") as out_file:
-            writer.write(out_file)
+        # Use a temporary file to prevent data corruption when overwriting
+        if overwriting_original:
+            # Write to a temp file first, then replace the original
+            fd, temp_path = tempfile.mkstemp(suffix=".pdf", dir=output_dir or None)
+            try:
+                with os.fdopen(fd, "wb") as temp_file:
+                    writer.write(temp_file)
+                # Replace original with temp file
+                shutil.move(temp_path, output_path)
+            except Exception:
+                # Clean up temp file on error
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+                raise
+        else:
+            with open(output_path, "wb") as out_file:
+                writer.write(out_file)
         
         logger.info(f"Rotated {len(pages_to_rotate)} pages in {path} by {rotation} degrees")
         return {
