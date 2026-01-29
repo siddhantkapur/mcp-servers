@@ -79,20 +79,34 @@ The agent will connect to the MCP servers and start an interactive conversation 
 
 ```python
 import asyncio
-from agent import create_agent
+from agent import create_agent, create_mcp_servers
+from agents import Runner
 
 async def main():
-    agent = create_agent()
+    # Create and initialize MCP servers
+    mcp_servers = create_mcp_servers()
     
-    # Use the agent with Runner
-    from agents import Runner
-    
-    async with agent:
+    try:
+        # Connect to MCP servers
+        for server in mcp_servers:
+            await server.connect()
+        
+        # Create agent with connected servers
+        agent = create_agent(mcp_servers=mcp_servers)
+        
+        # Use the agent with Runner
         result = await Runner.run(
             agent,
             input="Extract text from /path/to/document.pdf"
         )
         print(result.final_output)
+    finally:
+        # Clean up MCP servers (handle exceptions to ensure all cleanup attempts are made)
+        for server in mcp_servers:
+            try:
+                await server.cleanup()
+            except Exception as e:
+                print(f"Warning: Error cleaning up server: {e}")
 
 asyncio.run(main())
 ```
